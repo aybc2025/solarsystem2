@@ -1,0 +1,264 @@
+<!doctype html>
+
+<html lang="he" dir="rtl">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="theme-color" content="#0b1020" />
+    <title>מערכת השמש – PWA (קובץ יחיד)</title>
+    <style>
+      :root { --bg:#05060a; --panel:rgba(255,255,255,.08); --panel-2:rgba(255,255,255,.1); }
+      html, body { height: 100%; margin:0; background:var(--bg); color:#fff; font-family: system-ui, -apple-system, Segoe UI, Roboto, Heebo, Arial; }
+      #app { height:100%; }
+      canvas { display:block; }
+      .topbar { position:fixed; inset-inline:12px; top:12px; display:flex; align-items:center; justify-content:space-between; gap:8px; z-index:10; }
+      .brand { display:flex; align-items:center; gap:8px; }
+      .panel { position:fixed; right:12px; bottom:12px; background:var(--panel); backdrop-filter: blur(8px); padding: 12px 14px; border-radius:16px; max-width: 360px; z-index:10; }
+      .btn { background: var(--panel-2); border:0; color:#fff; padding:8px 12px; border-radius: 16px; cursor:pointer; }
+      .btn:hover{ background: rgba(255,255,255,.2); }
+      .quick { position:fixed; left:12px; bottom:12px; display:flex; flex-wrap:wrap; gap:8px; z-index:10; }
+      .hint { position:fixed; left:12px; top:58px; opacity:.6; font-size:12px; z-index:10; }
+    </style>
+    <link rel="manifest" id="manifest-link" />
+  </head>
+  <body>
+    <div id="app">
+      <div class="topbar">
+        <div class="brand">
+          <svg width="28" height="28" viewBox="0 0 64 64" aria-hidden>
+            <defs>
+              <radialGradient id="g" cx="50%" cy="50%" r="50%">
+                <stop offset="0%" stop-opacity="1" stop-color="#ffd36b" />
+                <stop offset="60%" stop-opacity="1" stop-color="#ffb300" />
+                <stop offset="100%" stop-opacity="1" stop-color="#ff8f00" />
+              </radialGradient>
+            </defs>
+            <circle cx="32" cy="32" r="14" fill="url(#g)" />
+            <circle cx="32" cy="32" r="26" fill="none" stroke="#ffffff" opacity="0.2" />
+          </svg>
+          <strong>SolarPWA</strong>
+          <span style="opacity:.7;font-size:12px">קובץ יחיד • PWA</span>
+        </div>
+        <div style="display:flex; gap:8px">
+          <button class="btn" id="zoomIn">זום +</button>
+          <button class="btn" id="zoomOut">זום −</button>
+          <button class="btn" id="installBtn" hidden>התקן</button>
+        </div>
+      </div>
+      <div class="hint">תפעול: גרירה לסיבוב, גלגל/פינץ׳ לזום, לחיצה כדי לקבל מידע</div>
+      <div class="panel" id="info" hidden></div>
+      <div class="quick" id="quick"></div>
+    </div><script type="module">
+  // ----------------- Imports (CDN) -----------------
+  import * as THREE from 'https://unpkg.com/three@0.160.0/build/three.module.js';
+  import { OrbitControls } from 'https://unpkg.com/three@0.160.0/examples/jsm/controls/OrbitControls.js';
+
+  // ----------------- PWA: Manifest + SW (data URLs) -----------------
+  createManifest();
+  registerServiceWorker();
+  setupInstallPrompt();
+
+  function createManifest(){
+    const icons = [192,512].map(size => ({ src: makeIconDataURL(size), sizes: `${size}x${size}`, type:'image/png' }));
+    const manifest = {
+      name: 'מערכת השמש – PWA', short_name: 'SolarPWA', lang: 'he-IL',
+      start_url: '.', display: 'standalone', background_color:'#05060a', theme_color:'#0b1020', icons
+    };
+    const blob = new Blob([JSON.stringify(manifest)], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const link = document.getElementById('manifest-link');
+    link.setAttribute('href', url);
+  }
+
+  function registerServiceWorker(){
+    if (!('serviceWorker' in navigator)) return;
+    const swCode = `
+      const CACHE = 'solar-single-v1';
+      self.addEventListener('install', e => { self.skipWaiting(); });
+      self.addEventListener('activate', e => { self.clients.claim(); });
+      self.addEventListener('fetch', (event) => {
+        const url = new URL(event.request.url);
+        // Cache-first for same-origin GET requests
+        if (event.request.method === 'GET' && url.origin === location.origin){
+          event.respondWith(
+            caches.open(CACHE).then(async cache => {
+              const cached = await cache.match(event.request);
+              if (cached) return cached;
+              try {
+                const resp = await fetch(event.request);
+                cache.put(event.request, resp.clone());
+                return resp;
+              } catch(err){
+                return cached || Response.error();
+              }
+            })
+          );
+        }
+      });
+    `;
+    const blob = new Blob([swCode], { type:'text/javascript' });
+    const url = URL.createObjectURL(blob);
+    navigator.serviceWorker.register(url).catch(console.error);
+  }
+
+  function setupInstallPrompt(){
+    let deferredPrompt; const btn = document.getElementById('installBtn');
+    window.addEventListener('beforeinstallprompt', (e) => { e.preventDefault(); deferredPrompt = e; btn.hidden = false; });
+    btn?.addEventListener('click', async () => { if (!deferredPrompt) return; deferredPrompt.prompt(); await deferredPrompt.userChoice; btn.hidden=true; deferredPrompt=null; });
+  }
+
+  function makeIconDataURL(size=192){
+    const c=document.createElement('canvas'); c.width=size; c.height=size; const g=c.getContext('2d');
+    g.fillStyle='#0b1020'; g.fillRect(0,0,size,size);
+    const rad=g.createRadialGradient(size*.5,size*.5,size*.1,size*.5,size*.5,size*.48);
+    rad.addColorStop(0,'#ffd36b'); rad.addColorStop(.6,'#ffb300'); rad.addColorStop(1,'#ff8f00');
+    g.fillStyle=rad; g.beginPath(); g.arc(size*.5,size*.5,size*.38,0,Math.PI*2); g.fill();
+    g.strokeStyle='rgba(255,255,255,.2)'; g.lineWidth=Math.max(2,size/64); g.beginPath(); g.arc(size*.5,size*.5,size*.42,0,Math.PI*2); g.stroke();
+    return c.toDataURL('image/png');
+  }
+
+  // ----------------- Scene Setup -----------------
+  const app = document.getElementById('app');
+  const info = document.getElementById('info');
+  const quick = document.getElementById('quick');
+  const zoomInBtn = document.getElementById('zoomIn');
+  const zoomOutBtn = document.getElementById('zoomOut');
+
+  const renderer = new THREE.WebGLRenderer({ antialias:true });
+  renderer.setPixelRatio(devicePixelRatio);
+  renderer.setSize(innerWidth, innerHeight);
+  app.appendChild(renderer.domElement);
+
+  const scene = new THREE.Scene();
+  scene.background = new THREE.Color(0x05060a);
+
+  const camera = new THREE.PerspectiveCamera(60, innerWidth/innerHeight, 0.1, 2000);
+  camera.position.set(0, 12, 60);
+
+  const controls = new OrbitControls(camera, renderer.domElement);
+  controls.enableDamping = true; controls.dampingFactor = 0.05; controls.minDistance = 5; controls.maxDistance = 400;
+
+  // Lights
+  scene.add(new THREE.AmbientLight(0xffffff, 0.25));
+  const sunLight = new THREE.PointLight(0xffffff, 2.0, 0, 2); sunLight.position.set(0,0,0); scene.add(sunLight);
+
+  // Starfield skybox via CanvasTexture
+  const starTex = new THREE.CanvasTexture(makeStarfield(1024,512));
+  const skyGeo = new THREE.SphereGeometry(500, 32, 32);
+  const skyMat = new THREE.MeshBasicMaterial({ map: starTex, side: THREE.BackSide });
+  const sky = new THREE.Mesh(skyGeo, skyMat); scene.add(sky);
+
+  // Data (can be extended easily)
+  const bodies = [
+    { id:'sun', name:'השמש', type:'star', radius:6.0, distance:0, description:'כוכב האם של מערכת השמש; מקור האור והחום.' },
+    { id:'mercury', name:'כוכב חמה', type:'planet', radius:0.25, distance:9, color:0x9e9e9e, orbitalPeriodDays:88, tex: makeMercuryTex() },
+    { id:'venus', name:'נוגה', type:'planet', radius:0.6, distance:12, orbitalPeriodDays:225, tex: makeGradientTex([ [240,200,120], [200,160,100] ]) },
+    { id:'earth', name:'כדור הארץ', type:'planet', radius:0.65, distance:16, orbitalPeriodDays:365, tex: makeEarthTex() },
+    { id:'moon', name:'הירח', type:'moon', around:'earth', radius:0.18, distance:1.6, orbitalPeriodDays:27.3, tex: makeMoonTex() },
+    { id:'mars', name:'מאדים', type:'planet', radius:0.34, distance:20, orbitalPeriodDays:687, tex: makeGradientTex([[180,70,50],[150,60,45]]) },
+    { id:'jupiter', name:'צדק', type:'planet', radius:1.8, distance:26, orbitalPeriodDays:4333, tex: makeJupiterTex() },
+    { id:'saturn', name:'שבתאי', type:'planet', radius:1.5, distance:33, orbitalPeriodDays:10759, tex: makeGradientTex([[225,210,160],[220,205,155]]), rings:true },
+    { id:'uranus', name:'אורון', type:'planet', radius:1.0, distance:40, orbitalPeriodDays:30687, tex: makeGradientTex([[150,210,225],[130,200,215]]) },
+    { id:'neptune', name:'נפטון', type:'planet', radius:0.97, distance:47, orbitalPeriodDays:60190, tex: makeGradientTex([[90,140,230],[70,120,210]]) },
+  ];
+
+  const objects = new Map();
+
+  // Sun
+  const sunGeo = new THREE.SphereGeometry(6.0, 64, 64);
+  const sunMat = new THREE.MeshStandardMaterial({ emissive:0xffaa00, emissiveIntensity:1.1, color:0xffcc33, roughness:0.5, metalness:0.0 });
+  const sun = new THREE.Mesh(sunGeo, sunMat); sun.userData = bodies[0]; scene.add(sun); objects.set('sun', sun);
+
+  // Orbits (rings)
+  const ringMaterial = new THREE.MeshBasicMaterial({ color:0xffffff, transparent:true, opacity:0.08, side:THREE.DoubleSide });
+  for (const b of bodies){ if (b.type==='planet'){ const g=new THREE.RingGeometry(b.distance-0.02, b.distance+0.02, 256); const m=new THREE.Mesh(g, ringMaterial); m.rotation.x=Math.PI/2; scene.add(m);} }
+
+  // Planets
+  for (const b of bodies){
+    if (b.type==='planet'){
+      const geo = new THREE.SphereGeometry(b.radius, 64, 64);
+      const mat = new THREE.MeshStandardMaterial({ map: b.tex, roughness:0.9 });
+      const mesh = new THREE.Mesh(geo, mat);
+      mesh.position.x = b.distance; mesh.userData = b; scene.add(mesh); objects.set(b.id, mesh);
+      if (b.id==='saturn' && b.rings){
+        const rg = new THREE.RingGeometry(b.radius*1.6, b.radius*2.7, 128);
+        const rm = new THREE.MeshStandardMaterial({ map: makeSaturnRingsTex(), side:THREE.DoubleSide, transparent:true, opacity:0.95 });
+        const rmesh = new THREE.Mesh(rg, rm); rmesh.rotation.x=-0.5; rmesh.position.x=b.distance; rmesh.userData = { ...b, name: b.name + ' – טבעות' }; scene.add(rmesh);
+      }
+    }
+  }
+
+  // Moon around Earth
+  const earth = objects.get('earth');
+  const moonData = bodies.find(b=>b.id==='moon');
+  if (earth && moonData){
+    const g = new THREE.Group(); g.position.copy(earth.position);
+    const geo = new THREE.SphereGeometry(moonData.radius, 48, 48);
+    const mat = new THREE.MeshStandardMaterial({ map: moonData.tex, roughness:1.0 });
+    const m = new THREE.Mesh(geo, mat); m.position.x = moonData.distance; m.userData = moonData; g.add(m); earth.userData._moonGroup = g; scene.add(g); objects.set('moon', m);
+  }
+
+  // Interaction
+  const raycaster = new THREE.Raycaster(); const mouse = new THREE.Vector2();
+  renderer.domElement.addEventListener('pointermove', (e)=>{ const r=renderer.domElement.getBoundingClientRect(); mouse.x=((e.clientX-r.left)/r.width)*2-1; mouse.y=-((e.clientY-r.top)/r.height)*2+1; });
+  renderer.domElement.addEventListener('click', ()=>{ raycaster.setFromCamera(mouse,camera); const hits=raycaster.intersectObjects(scene.children,true); const first=hits.find(i=>i.object?.userData?.id||i.object?.userData?.type); if(first){ focusOn(first.object); showInfo(first.object.userData);} });
+
+  zoomInBtn.addEventListener('click', ()=> zoom(-5));
+  zoomOutBtn.addEventListener('click', ()=> zoom(5));
+  function zoom(delta){ const min=Math.max(5, controls.minDistance+delta); const max=Math.max(min+50, controls.maxDistance+delta); controls.minDistance=min; controls.maxDistance=max; }
+
+  // Quick Jump
+  const quickItems = [
+    ['sun','השמש'],['mercury','כוכב חמה'],['venus','נוגה'],['earth','כדור הארץ'],['moon','הירח'],['mars','מאדים'],['jupiter','צדק'],['saturn','שבתאי'],['uranus','אורון'],['neptune','נפטון']
+  ];
+  for (const [id,label] of quickItems){ const b=document.createElement('button'); b.className='btn'; b.textContent=label; b.onclick=()=>{ const o=objects.get(id); if(o){ focusOn(o); showInfo(o.userData);} if(id==='sun'){ showInfo({id:'sun',name:'השמש',type:'star',description:'כוכב האם של מערכת השמש; מקור האור והחום.'}); } }; quick.appendChild(b);} 
+
+  function showInfo(d){ info.hidden=false; info.innerHTML = `
+    <div style="font-weight:600;margin-bottom:6px">${d.name||'—'}</div>
+    <div style="opacity:.8;font-size:14px;margin-bottom:4px">סוג: ${typeLabel(d.type)}</div>
+    ${Number.isFinite(d.orbitalPeriodDays)?`<div style="opacity:.8;font-size:14px">תקופת הקפה (ימים): ${d.orbitalPeriodDays}</div>`:''}
+    ${d.radius?`<div style=\"opacity:.8;font-size:14px\">רדיוס (מדומה): ${d.radius}</div>`:''}
+    ${d.distance!==undefined?`<div style=\"opacity:.8;font-size:14px\">מרחק מן המרכז (מדומה): ${d.distance}</div>`:''}
+    ${d.description?`<div style=\"margin-top:6px;line-height:1.5\">${d.description}</div>`:''}
+  `; }
+
+  function typeLabel(t){ switch(t){ case 'star': return 'כוכב'; case 'planet': return 'כוכב לכת'; case 'moon': return 'ירח'; default: return 'גרם שמיים'; } }
+
+  function focusOn(object){ const box=new THREE.Box3().setFromObject(object); const size=box.getSize(new THREE.Vector3()).length(); const center=box.getCenter(new THREE.Vector3()); controls.target.copy(center); const dist=Math.max(10,size*3); const dir=new THREE.Vector3(0,size*0.3,dist); camera.position.copy(center.clone().add(dir)); controls.update(); }
+
+  // Animation
+  const clock = new THREE.Clock();
+  function animate(){
+    const t = clock.getElapsedTime();
+    sun.rotation.y += 0.0008;
+    for (const b of bodies){ if(b.type==='planet'){ const mesh=objects.get(b.id); if(mesh){ const speed=(1/(b.orbitalPeriodDays||1))*2.0; const angle=t*speed*Math.PI*2; mesh.position.x=Math.cos(angle)*b.distance; mesh.position.z=Math.sin(angle)*b.distance; mesh.rotation.y += 0.002; } } }
+    const earth=objects.get('earth'); const moon=objects.get('moon'); if(earth && earth.userData?._moonGroup && moon){ const speed=(1/27.3)*6.0; const angle=t*speed*Math.PI*2; earth.userData._moonGroup.position.copy(earth.position); moon.position.x=Math.cos(angle)*1.6; moon.position.z=Math.sin(angle)*1.6; }
+    controls.update(); renderer.render(scene,camera); requestAnimationFrame(animate);
+  }
+  animate();
+
+  // Resize
+  addEventListener('resize', ()=>{ camera.aspect=innerWidth/innerHeight; camera.updateProjectionMatrix(); renderer.setSize(innerWidth, innerHeight); });
+
+  // ----------------- Texture Generators (Canvas) -----------------
+  function makeCanvas(w,h){ const c=document.createElement('canvas'); c.width=w; c.height=h; return c; }
+
+  function makeStarfield(w=1024,h=512){ const c=makeCanvas(w,h), g=c.getContext('2d'); g.fillStyle='#05060a'; g.fillRect(0,0,w,h); for(let i=0;i<w*h*0.001;i++){ const x=Math.random()*w, y=Math.random()*h; const b=180+Math.random()*75; const s=Math.random()<.9?1:2; g.fillStyle=`rgb(${b},${b},${b})`; g.beginPath(); g.ellipse(x,y,s,s,0,0,Math.PI*2); g.fill(); } g.filter='blur(0.2px)'; return c; }
+
+  function makeGradientTex(stops=[[220,205,155],[200,160,100]], w=1024,h=512){ const c=makeCanvas(w,h), g=c.getContext('2d'); const grd=g.createLinearGradient(0,0,0,h); grd.addColorStop(0,`rgb(${stops[0].join(',')})`); grd.addColorStop(1,`rgb(${stops[stops.length-1].join(',')})`); g.fillStyle=grd; g.fillRect(0,0,w,h); return new THREE.CanvasTexture(c); }
+
+  function makeJupiterTex(w=1024,h=512){ const c=makeCanvas(w,h), g=c.getContext('2d'); const bands=[[198,170,132],[205,180,150],[180,150,120],[210,190,160],[170,140,110]]; let y=0; while(y<h){ const bh=Math.floor(h*(.02+.05*Math.random())); const col=bands[(Math.random()*bands.length)|0]; g.fillStyle=`rgb(${col.join(',')})`; g.fillRect(0,y,w,Math.min(h,y+bh)); y+=bh; } g.globalAlpha=.35; g.filter='blur(0.6px)'; g.fillRect(0,0,0,0); return new THREE.CanvasTexture(c); }
+
+  function makeEarthTex(w=1024,h=512){ const c=makeCanvas(w,h), g=c.getContext('2d'); const sea=g.createLinearGradient(0,0,0,h); sea.addColorStop(0,'rgb(30,55,110)'); sea.addColorStop(1,'rgb(15,40,90)'); g.fillStyle=sea; g.fillRect(0,0,w,h); g.globalAlpha=0.9; for(let i=0;i<60;i++){ const rx=Math.random()*w, ry=Math.random()*h; const rw=w*(.01+.04*Math.random()); const rh=h*(.01+.05*Math.random()); const r=30+Math.random()*50, gg=100+Math.random()*70, b=40+Math.random()*50; g.fillStyle=`rgb(${r|0},${gg|0},${b|0})`; g.beginPath(); g.ellipse(rx,ry,rw,rh,0,0,Math.PI*2); g.fill(); } return new THREE.CanvasTexture(c); }
+
+  function makeMoonTex(w=1024,h=512){ const c=makeCanvas(w,h), g=c.getContext('2d'); const grd=g.createLinearGradient(0,0,0,h); grd.addColorStop(0,'rgb(190,190,190)'); grd.addColorStop(1,'rgb(170,170,170)'); g.fillStyle=grd; g.fillRect(0,0,w,h); g.globalAlpha=.25; for(let i=0;i<2000;i++){ const x=Math.random()*w, y=Math.random()*h; const n=(Math.random()*40-20)|0; g.fillStyle=`rgb(${180+n},${180+n},${180+n})`; g.fillRect(x,y,1,1); } return new THREE.CanvasTexture(c); }
+
+  function makeMercuryTex(w=1024,h=512){ const c=makeCanvas(w,h), g=c.getContext('2d'); const grd=g.createLinearGradient(0,0,0,h); grd.addColorStop(0,'rgb(140,140,140)'); grd.addColorStop(1,'rgb(120,120,120)'); g.fillStyle=grd; g.fillRect(0,0,w,h); g.globalAlpha=.35; for(let i=0;i<1500;i++){ const x=Math.random()*w, y=Math.random()*h; const s=Math.random()<.95?1:2; const n=(Math.random()*70-35)|0; g.fillStyle=`rgb(${150+n},${150+n},${150+n})`; g.fillRect(x,y,s,s); } return new THREE.CanvasTexture(c); }
+
+  function makeSaturnRingsTex(size=1024){ const c=makeCanvas(size,size), g=c.getContext('2d'); g.clearRect(0,0,size,size); const cx=size/2, cy=size/2; const minR=size*.24, maxR=size*.48; for(let r=minR; r<maxR; r+=2){ const t=(r-minR)/(maxR-minR); const varc=Math.sin(t*35)*30; const R= Math.max(0, Math.min(255, 233+varc)); const G= Math.max(0, Math.min(255, 225+varc)); const B= Math.max(0, Math.min(255, 181+varc)); const A= Math.max(0, Math.min(255, 170*(1-Math.abs(t-.5)*1.8))); g.strokeStyle=`rgba(${R|0},${G|0},${B|0},${(A/255).toFixed(3)})`; g.beginPath(); g.arc(cx,cy,r,0,Math.PI*2); g.stroke(); }
+    return new THREE.CanvasTexture(c);
+  }
+</script>
+
+  </body>
+</html>
