@@ -49,9 +49,16 @@
       <div class="panel" id="info" hidden></div>
       <div class="quick" id="quick"></div>
     </div><script type="module">
+  // Debug overlay for runtime errors on mobile
+  window.onerror = (m, s, l, c, e) => {
+    const d = document.createElement('div');
+    d.style = 'position:fixed;bottom:12px;left:12px;right:12px;background:#300;padding:8px;border-radius:8px;color:#fff;z-index:9999;font:12px monospace;';
+    d.textContent = 'JS Error: ' + m;
+    document.body.appendChild(d);
+  };
   // ----------------- Imports (CDN) -----------------
-  import * as THREE from 'https://unpkg.com/three@0.160.0/build/three.module.js';
-  import { OrbitControls } from 'https://unpkg.com/three@0.160.0/examples/jsm/controls/OrbitControls.js';
+  import * as THREE from 'https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js';
+  import { OrbitControls } from 'https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/controls/OrbitControls.js';
 
   // ----------------- PWA: Manifest + SW (data URLs) -----------------
   createManifest();
@@ -98,7 +105,8 @@
     `;
     const blob = new Blob([swCode], { type:'text/javascript' });
     const url = URL.createObjectURL(blob);
-    navigator.serviceWorker.register(url).catch(console.error);
+    // Temporarily disabled to avoid caching a bad version during debugging
+    // navigator.serviceWorker.register(url).catch(console.error);
   }
 
   function setupInstallPrompt(){
